@@ -1,111 +1,142 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import plotly.express as px
 
-from scipy.optimize import minimize
+st.set_page_config(page_title="Portfolio Analyzer with Married Put", layout="wide")
+st.title("📈 Monte Carlo Portfolio Optimizer with Married Put Insurance")
 
-st.set_page_config(layout="wide")
-st.title("ابزار تحلیل پرتفو و بیمه با آپشن پوت")
+# Upload section
+st.sidebar.header("📂 Upload Asset CSV Files")
+uploaded_files = st.sidebar.file_uploader("Upload CSV files (each with 'Date' and 'Price')", type=['csv'], accept_multiple_files=True)
 
-# --------------------- بخش بارگذاری داده ---------------------
-st.sidebar.header("بارگذاری فایل دارایی‌ها (Date, Price)")
-uploaded_files = st.sidebar.file_uploader("انتخاب فایل‌ها", accept_multiple_files=True, type=["csv"])
+# Period selection
+period = st.sidebar.selectbox("Return Analysis Period", ['Monthly', 'Quarterly', 'Semi-Annually'])
+resample_rule = {'Monthly': 'M', 'Quarterly': 'Q', 'Semi-Annually': '2Q'}[period]
+annual_factor = {'Monthly': 12, 'Quarterly': 4, 'Semi-Annually': 2}[period]
 
-price_data = {}
-for file in uploaded_files:
-    df = pd.read_csv(file)
-    df.columns = [col.strip().lower() for col in df.columns]
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date')
-    df['price'] = df['price'].astype(str).str.replace(',', '').astype(float)
-    name = file.name.split(".")[0]
-    price_data[name] = df.set_index('date')['price']
+if uploaded_files:
+    prices_df = pd.DataFrame()
+    asset_names = []
+    insured_assets = {}
 
-if price_data:
-    prices_df = pd.concat(price_data.values(), axis=1)
-    prices_df.columns = price_data.keys()
-    returns = prices_df.pct_change().dropna()
+    for file in uploaded_files:
+        name = file.name.split('.')[0]
+        df = pd.read_csv(file)
+        if 'Date' not in df.columns or 'Price' not in df.columns:
+            st.warning(f"File {name} must contain 'Date' and 'Price' columns.")
+            continue
 
-    st.subheader("تنظیمات بیمه (Protective Put)")
-    insurance_settings = {}
-    for asset in prices_df.columns:
-        with st.expander(f"📉 {asset}"):
-            insured = st.checkbox(f"آیا بیمه دارد؟", key=f"{asset}_insured")
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df['Price'] = df['Price'].astype(str).str.replace(',', '')
+        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+        df = df.dropna(subset=['Date', 'Price'])
+        df = df[['Date', 'Price']].set_index('Date')
+        df.columns = [name]
+
+        prices_df = df if prices_df.empty else prices_df.join(df, how='inner')
+        asset_names.append(name)
+
+        with st.sidebar.expander(f"⚙️ Insurance Settings for {name}"):
+            insured = st.checkbox(f"Enable insurance for {name}", key=f"insured_{name}")
             if insured:
-                price = st.number_input(f"قیمت خرید دارایی پایه", key=f"{asset}_base", value=prices_df[asset].iloc[-1])
-                strike = st.number_input(f"قیمت اعمال پوت", key=f"{asset}_strike")
-                premium = st.number_input(f"پریمیوم پوت", key=f"{asset}_premium")
-                qty = st.number_input(f"تعداد دارایی", key=f"{asset}_qty", value=1)
-                insurance_settings[asset] = {'price': price, 'strike': strike, 'premium': premium, 'qty': qty}
+                strike = st.number_input("Strike Price", value=100.0, step=1.0, key=f"strike_{name}")
+                premium = st.number_input("Premium", value=5.0, step=0.1, key=f"premium_{name}")
+                spot = st.number_input("Current Price", value=100.0, step=1.0, key=f"spot_{name}")
+                amount = st.number_input("Asset Amount", value=1.0, step=1.0, key=f"amount_{name}")
+                insured_assets[name] = {
+                    'strike': strike,
+                    'premium': premium,
+                    'spot': spot,
+                    'amount': amount
+                }
 
-    # --------------------- محاسبه ریسک و بازده تعدیل‌شده ---------------------
-    mean_returns = returns.mean()
-    cov_matrix = returns.cov()
+    if prices_df.empty:
+        st.error("❌ No valid data found for analysis.")
+        st.stop()
 
-    adjusted_cov = cov_matrix.copy()
-    for asset, setting in insurance_settings.items():
-        insured_var = cov_matrix.loc[asset, asset]
-        reduced_var = insured_var * 0.25  # کاهش ریسک به 25٪
-        adjusted_cov.loc[asset, asset] = reduced_var
+    st.subheader("📊 Price Preview")
+    st.dataframe(prices_df.tail())
 
-    # --------------------- پرتفو بهینه با ریسک تعدیل‌شده ---------------------
-    st.subheader("🎯 پرتفو بهینه با ریسک تعدیل‌شده")
-    target_risk = st.slider("هدف ریسک پرتفو (%)", 5, 50, 20) / 100
-    num_assets = len(mean_returns)
+    returns = prices_df.resample(resample_rule).last().pct_change().dropna()
+    mean_returns = returns.mean() * annual_factor
+    cov_matrix = returns.cov() * annual_factor
 
-    def portfolio_perf(weights, mean_returns, cov_matrix):
-        returns = np.sum(mean_returns * weights)
-        std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        return returns, std
+    # Adjust risk for insured assets
+    for asset in insured_assets:
+        cov_matrix.loc[asset, asset] *= 0.25  # reduce risk if insured
 
-    def minimize_volatility(weights):
-        return portfolio_perf(weights, mean_returns, adjusted_cov)[1]
+    # Monte Carlo Simulation
+    np.random.seed(42)
+    n_portfolios = 5000
+    n_assets = len(asset_names)
+    results = np.zeros((3 + n_assets, n_portfolios))
 
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0, 1) for _ in range(num_assets))
-    initial_guess = num_assets * [1. / num_assets]
+    for i in range(n_portfolios):
+        weights = np.random.random(n_assets)
+        weights /= np.sum(weights)
+        port_return = np.dot(weights, mean_returns)
+        port_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        sharpe = port_return / port_std
+        results[0, i] = port_return
+        results[1, i] = port_std
+        results[2, i] = sharpe
+        results[3:, i] = weights
 
-    result = minimize(minimize_volatility, initial_guess, method='SLSQP', bounds=bounds, constraints=constraints)
-    opt_weights = result.x
+    # Find optimal portfolio near target risk
+    target_risk = st.sidebar.slider("🎯 Target Portfolio Risk (%)", 5, 50, 25) / 100
+    best_idx = np.argmin(np.abs(results[1] - target_risk))
+    best_return = results[0, best_idx]
+    best_risk = results[1, best_idx]
+    best_sharpe = results[2, best_idx]
+    best_weights = results[3:, best_idx]
 
-    risk, ret = portfolio_perf(opt_weights, mean_returns, adjusted_cov)
-    st.write("ریسک پرتفو بهینه: {:.2f}٪".format(risk * 100))
-    st.write("بازده مورد انتظار: {:.2f}٪".format(ret * 100))
+    st.subheader("📈 Optimal Portfolio")
+    st.write(f"**Annual Return:** {best_return:.2%}")
+    st.write(f"**Annual Risk:** {best_risk:.2%}")
+    st.write(f"**Sharpe Ratio:** {best_sharpe:.2f}")
 
-    opt_df = pd.DataFrame({
-        'دارایی': mean_returns.index,
-        'وزن بهینه (%)': np.round(opt_weights * 100, 2)
-    })
-    st.dataframe(opt_df)
+    for i, name in enumerate(asset_names):
+        st.write(f"🔹 {name}: {best_weights[i]*100:.2f}%")
 
-    # --------------------- نمودار Married Put ---------------------
-    st.subheader("📊 نمودار سود و زیان استراتژی Married Put")
-    for asset, setting in insurance_settings.items():
-        current_price = setting['price']
-        strike = setting['strike']
-        premium = setting['premium']
-        qty = setting['qty']
+    fig = px.scatter(
+        x=results[1]*100, y=results[0]*100, color=results[2],
+        labels={'x': 'Risk (%)', 'y': 'Return (%)'},
+        title='Simulated Portfolios', color_continuous_scale='Viridis')
+    fig.add_scatter(x=[best_risk*100], y=[best_return*100], mode='markers', marker=dict(size=12, color='red', symbol='star'), name='Optimal')
+    st.plotly_chart(fig)
 
-        prices = np.linspace(current_price * 0.7, current_price * 1.3, 200)
-        payoff_stock = (prices - current_price) * qty
-        payoff_put = np.where(prices < strike, (strike - prices), 0) * qty - premium * qty
-        total_payoff = payoff_stock + payoff_put
+    # Plot Married Put
+    for asset, data in insured_assets.items():
+        st.subheader(f"💹 Married Put Strategy - {asset}")
+        x = np.linspace(data['spot'] * 0.7, data['spot'] * 1.3, 300)
+        asset_pnl = (x - data['spot']) * data['amount']
+        put_pnl = np.where(x < data['strike'], data['strike'] - x, 0) * data['amount'] - data['premium'] * data['amount']
+        total_pnl = asset_pnl + put_pnl
 
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(prices, total_payoff, label="Married Put", color='blue')
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=x, y=total_pnl, name="Married Put", line=dict(color='blue', width=2)))
+        fig2.add_trace(go.Scatter(x=x, y=asset_pnl, name="Stock Only", line=dict(dash='dot')))
+        fig2.add_trace(go.Scatter(x=x, y=put_pnl, name="Put Option", line=dict(dash='dot')))
 
-        # ناحیه سود / زیان
-        ax.fill_between(prices, total_payoff, where=(total_payoff >= 0), color='green', alpha=0.2)
-        ax.fill_between(prices, total_payoff, where=(total_payoff < 0), color='red', alpha=0.2)
+        fig2.add_shape(type="rect", x0=x.min(), x1=data['spot'], y0=min(total_pnl.min(), 0), y1=0,
+                      fillcolor="red", opacity=0.2, line_width=0)
+        fig2.add_shape(type="rect", x0=data['spot'], x1=x.max(), y0=0, y1=max(total_pnl.max(), 0),
+                      fillcolor="green", opacity=0.2, line_width=0)
 
-        # خط عمودی قیمت اعمال
-        ax.axvline(x=strike, linestyle='--', color='black', label='Strike')
+        fig2.add_vline(x=data['strike'], line=dict(dash='dot', color='black'))
+        fig2.add_vline(x=data['spot'], line=dict(dash='dot', color='green'))
 
-        # محور
-        ax.axhline(0, color='gray', linestyle='--')
-        ax.set_xlabel("قیمت دارایی پایه")
-        ax.set_ylabel("سود / زیان (P&L)")
-        ax.set_title(f"📌 استراتژی Married Put برای دارایی: {asset}")
-        ax.legend()
-        st.pyplot(fig)
+        fig2.update_layout(
+            title="Profit / Loss of Married Put",
+            xaxis_title="Underlying Price at Expiration",
+            yaxis_title="Profit / Loss",
+            plot_bgcolor="white",
+            hovermode="x unified"
+        )
+
+        st.plotly_chart(fig2)
+else:
+    st.warning("Please upload at least one CSV file.")
