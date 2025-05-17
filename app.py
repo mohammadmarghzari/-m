@@ -76,7 +76,11 @@ if uploaded_files:
 
         # تنظیمات بیمه در سایدبار برای هر دارایی
         st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
-        insured = st.sidebar.checkbox(f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}_{uuid.uuid4()}")
+        insured = st.sidebar.checkbox(
+            f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}_{uuid.uuid4()}"
+        )
+        # دیباگ وضعیت چک‌باکس
+        st.sidebar.write(f"وضعیت بیمه برای {name}: {'فعال' if insured else 'غیرفعال'}")
         if insured:
             loss_percent = st.sidebar.number_input(
                 f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}_{uuid.uuid4()}"
@@ -117,7 +121,7 @@ if uploaded_files:
 
     mean_returns = returns.mean() * annual_factor
 
-    # 1. دریافت ریسک سالانه هر دارایی از کاربر
+    # دریافت ریسک سالانه هر دارایی از کاربر
     st.sidebar.header("⚙️ تنظیمات ریسک دارایی‌ها")
     asset_risks = {}
     for name in asset_names:
@@ -130,12 +134,12 @@ if uploaded_files:
             risk = risk * (1 - insured_assets[name]['loss_percent']/100)
         asset_risks[name] = risk / 100  # درصد به عدد اعشاری
 
-    # 2. ریسک هدف پورتفو
+    # ریسک هدف پورتفو
     target_risk = st.sidebar.number_input(
         "ریسک هدف پورتفو (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.1
     ) / 100
 
-    # 3. ساخت ماتریس کوواریانس
+    # ساخت ماتریس کوواریانس
     correlation_matrix = returns.corr()
     cov_matrix_fixed = np.zeros_like(correlation_matrix.values)
     for i, name_i in enumerate(asset_names):
@@ -239,7 +243,7 @@ if uploaded_files:
         # محاسبات سود و زیان
         x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
         asset_pnl = (x - info['spot']) * info['base']
-        put_pnl = np.where(x < liberally['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
+        put_pnl = np.where(x < info['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
         total_pnl = asset_pnl + put_pnl
 
         # محاسبه نقطه سر به سر
