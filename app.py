@@ -104,7 +104,7 @@ if uploaded_files:
 
     mean_returns = returns.mean() * annual_factor
 
-    # 1. دریافت ریسک سالانه هر دارایی از کاربر (پیش‌فرض 20%)
+    # 1. دریافت ریسک سالانه هر دارایی از کاربر
     st.sidebar.header("⚙️ تنظیمات ریسک دارایی‌ها")
     asset_risks = {}
     for name in asset_names:
@@ -122,7 +122,7 @@ if uploaded_files:
         "ریسک هدف پورتفو (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.1
     ) / 100
 
-    # 3. ساخت ماتریس کوواریانس با ریسک‌های ورودی و حفظ همبستگی واقعی
+    # 3. ساخت ماتریس کوواریانس
     correlation_matrix = returns.corr()
     cov_matrix_fixed = np.zeros_like(correlation_matrix.values)
     for i, name_i in enumerate(asset_names):
@@ -172,13 +172,13 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 وزن {name}: {best_weights[i]*100:.2f}%")
 
-    # نمودار پراکندگی ریسک-بازده با تم سفارشی
+    # نمودار پراکندگی ریسک-بازده
     fig = px.scatter(
         x=results[1]*100, 
         y=results[0]*100, 
         color=results[2],
-        labels={'x': 'Annual Risk (%)', 'y': 'Annual Return (%)'},
-        title='Portfolio Simulation Results (Monte Carlo)',
+        labels={'x': 'ریسک (%)', 'y': 'بازده (%)'},
+        title='پرتفوهای شبیه‌سازی‌شده',
         color_continuous_scale='Viridis'
     )
     
@@ -188,8 +188,8 @@ if uploaded_files:
         y=[best_return*100],
         mode='markers',
         marker=dict(size=15, color='gold', symbol='star', line=dict(width=2, color='black')),
-        name='Optimal Portfolio'
-    )
+        name='پرتفوی بهینه'
+    ))
     
     # اضافه کردن خط ریسک هدف
     fig.add_shape(
@@ -197,7 +197,7 @@ if uploaded_files:
         x0=target_risk*100, y0=0,
         x1=target_risk*100, y1=results[0].max()*100,
         line=dict(color='red', width=2, dash='dot'),
-        name='Target Risk'
+        name='ریسک هدف'
     )
     
     # اعمال تم سفارشی
@@ -212,7 +212,7 @@ if uploaded_files:
             x=1
         ),
         coloraxis_colorbar=dict(
-            title='Sharpe Ratio',
+            title='نسبت شارپ',
             thickness=20
         )
     )
@@ -221,7 +221,7 @@ if uploaded_files:
 
     # نمودار Married Put برای هر دارایی بیمه شده
     for name, info in insured_assets.items():
-        st.subheader(f"📉 Married Put Strategy - {name}")
+        st.subheader(f"📉 نمودار سود و زیان استراتژی Married Put - {name}")
         
         # محاسبات سود و زیان
         x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
@@ -240,7 +240,7 @@ if uploaded_files:
             x=x, 
             y=total_pnl, 
             mode='lines', 
-            name='Married Put Strategy',
+            name='استراتژی Married Put',
             line=dict(width=3, color='#636EFA'),
             fill='tozeroy',
             fillcolor='rgba(99, 110, 250, 0.2)'
@@ -250,16 +250,16 @@ if uploaded_files:
             x=x, 
             y=asset_pnl, 
             mode='lines', 
-            name='Underlying Asset',
-            line=dict(width=2, color='#EF553B', dash='dash'))
+            name='دارایی پایه',
+            line=dict(width=2, color='#EF553B', dash='dash')
         )
         
         fig2.add_trace(go.Scatter(
             x=x, 
             y=put_pnl, 
             mode='lines', 
-            name='Put Option',
-            line=dict(width=2, color='#00CC96', dash='dash'))
+            name='اختیار فروش',
+            line=dict(width=2, color='#00CC96', dash='dash')
         )
         
         # اضافه کردن خطوط و نقاط مهم
@@ -268,7 +268,7 @@ if uploaded_files:
             x0=info['spot'], y0=min(total_pnl.min(), asset_pnl.min(), put_pnl.min()),
             x1=info['spot'], y1=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
             line=dict(color='white', width=1, dash='dot'),
-            name='Current Price'
+            name='قیمت فعلی'
         )
         
         fig2.add_shape(
@@ -276,7 +276,7 @@ if uploaded_files:
             x0=breakeven, y0=min(total_pnl.min(), asset_pnl.min(), put_pnl.min()),
             x1=breakeven, y1=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
             line=dict(color='gold', width=1, dash='dot'),
-            name='Breakeven'
+            name='نقطه سر به سر'
         )
         
         # اضافه کردن حاشیه‌نویسی
@@ -286,7 +286,7 @@ if uploaded_files:
                 y=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
                 xref='x',
                 yref='y',
-                text=f"Spot Price: {info['spot']:.2f}",
+                text=f"قیمت فعلی: {info['spot']:.2f}",
                 showarrow=True,
                 arrowhead=1,
                 ax=0,
@@ -297,7 +297,7 @@ if uploaded_files:
                 y=0,
                 xref='x',
                 yref='y',
-                text=f"Breakeven: {breakeven:.2f}",
+                text=f"نقطه سر به سر: {breakeven:.2f}",
                 showarrow=True,
                 arrowhead=1,
                 ax=0,
@@ -308,7 +308,7 @@ if uploaded_files:
                 y=put_pnl[np.abs(x - info['strike']).argmin()],
                 xref='x',
                 yref='y',
-                text=f"Strike Price: {info['strike']:.2f}",
+                text=f"قیمت اعمال: {info['strike']:.2f}",
                 showarrow=True,
                 arrowhead=1,
                 ax=40,
@@ -318,9 +318,9 @@ if uploaded_files:
         
         # اعمال تم و تنظیمات نهایی
         fig2.update_layout(
-            title=f'Married Put Strategy Payoff Diagram - {name}',
-            xaxis_title='Underlying Asset Price at Expiration',
-            yaxis_title='Profit/Loss',
+            title=f'نمودار سود و زیان استراتژی Married Put - {name}',
+            xaxis_title='قیمت دارایی در سررسید',
+            yaxis_title='سود/زیان',
             template=custom_theme,
             annotations=annotations,
             hovermode='x unified',
