@@ -48,6 +48,10 @@ period = st.sidebar.selectbox("بازه تحلیل بازده", ['ماهانه',
 resample_rule = {'ماهانه': 'M', 'سه‌ماهه': 'Q', 'شش‌ماهه': '2Q'}[period]
 annual_factor = {'ماهانه': 12, 'سه‌ماهه': 4, 'شش‌ماهه': 2}[period]
 
+# مدیریت حالت‌ها با session_state
+if 'insured_states' not in st.session_state:
+    st.session_state.insured_states = {}
+
 if uploaded_files:
     prices_df = pd.DataFrame()
     asset_names = []
@@ -76,12 +80,24 @@ if uploaded_files:
 
         # تنظیمات بیمه در سایدبار برای هر دارایی
         st.sidebar.markdown(f"---\n### ⚙️ تنظیمات بیمه برای دارایی: `{name}`")
+        
+        # استفاده از session_state برای چک‌باکس
+        insured_key = f"insured_{name}"
+        if insured_key not in st.session_state.insured_states:
+            st.session_state.insured_states[insured_key] = False
+
         insured = st.sidebar.checkbox(
-            f"📌 فعال‌سازی بیمه برای {name}", key=f"insured_{name}_{uuid.uuid4()}"
+            f"📌 فعال‌سازی بیمه برای {name}", 
+            value=st.session_state.insured_states[insured_key],
+            key=f"insured_{name}_{uuid.uuid4()}"
         )
+        st.session_state.insured_states[insured_key] = insured
+
         # دیباگ وضعیت چک‌باکس
         st.sidebar.write(f"وضعیت بیمه برای {name}: {'فعال' if insured else 'غیرفعال'}")
+
         if insured:
+            st.sidebar.subheader(f"تنظیمات قرارداد پوت برای {name}")
             loss_percent = st.sidebar.number_input(
                 f"📉 درصد ضرر معامله پوت برای {name}", 0.0, 100.0, 30.0, step=0.01, key=f"loss_{name}_{uuid.uuid4()}"
             )
