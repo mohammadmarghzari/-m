@@ -8,6 +8,24 @@ import plotly.express as px
 st.set_page_config(page_title="تحلیل پرتفو با مونت‌کارلو و Married Put", layout="wide")
 st.title("📊 ابزار تحلیل پرتفو با روش مونت‌کارلو و استراتژی Married Put")
 
+# تنظیم تم سفارشی برای نمودارها
+custom_theme = {
+    'layout': {
+        'plot_bgcolor': 'rgba(17,17,17,1)',
+        'paper_bgcolor': 'rgba(17,17,17,1)',
+        'font': {'color': 'white'},
+        'xaxis': {
+            'gridcolor': 'rgba(255, 255, 255, 0.1)',
+            'linecolor': 'rgba(255, 255, 255, 0.5)'
+        },
+        'yaxis': {
+            'gridcolor': 'rgba(255, 255, 255, 0.1)',
+            'linecolor': 'rgba(255, 255, 255, 0.5)'
+        },
+        'colorway': px.colors.qualitative.Plotly
+    }
+}
+
 # تابع خواندن فایل CSV
 def read_csv_file(file):
     try:
@@ -94,9 +112,10 @@ if uploaded_files:
             f"ریسک سالانه دارایی {name} (%)",
             min_value=0.0, max_value=100.0, value=20.0, step=0.1, key=f"risk_{name}"
         )
+        # کاهش ریسک برای دارایی‌های بیمه شده
         if name in insured_assets:
-            risk *= 0.5  # اثر بیمه: کاهش ریسک
-        asset_risks[name] = risk / 100
+            risk = risk * (1 - insured_assets[name]['loss_percent']/100)
+        asset_risks[name] = risk / 100  # درصد به عدد اعشاری
 
     # 2. ریسک هدف پورتفو
     target_risk = st.sidebar.number_input(
@@ -153,46 +172,172 @@ if uploaded_files:
     for i, name in enumerate(asset_names):
         st.markdown(f"🔹 وزن {name}: {best_weights[i]*100:.2f}%")
 
-    # نمودار پراکندگی ریسک-بازده
-    fig = px.scatter(x=results[1]*100, y=results[0]*100, color=results[2],
-                     labels={'x': 'ریسک (%)', 'y': 'بازده (%)'},
-                     title='پرتفوهای شبیه‌سازی‌شده', color_continuous_scale='Viridis')
-    fig.add_trace(go.Scatter(x=[best_risk*100], y=[best_return*100],
-                             mode='markers', marker=dict(size=12, color='red', symbol='star'),
-                             name='پرتفوی بهینه'))
-    st.plotly_chart(fig, key="monte_carlo_scatter")
+    # نمودار پراکندگی ریسک-بازده با تم سفارشی
+    fig = px.scatter(
+        x=results[1]*100, 
+        y=results[0]*100, 
+        color=results[2],
+        labels={'x': 'Annual Risk (%)', 'y': 'Annual Return (%)'},
+        title='Portfolio Simulation Results (Monte Carlo)',
+        color_continuous_scale='Viridis'
+    )
+    
+    # اضافه کردن نقطه پرتفوی بهینه
+    fig.add_trace(go.Scatter(
+        x=[best_risk*100], 
+        y=[best_return*100],
+        mode='markers',
+        marker=dict(size=15, color='gold', symbol='star', line=dict(width=2, color='black')),
+        name='Optimal Portfolio'
+    )
+    
+    # اضافه کردن خط ریسک هدف
+    fig.add_shape(
+        type='line',
+        x0=target_risk*100, y0=0,
+        x1=target_risk*100, y1=results[0].max()*100,
+        line=dict(color='red', width=2, dash='dot'),
+        name='Target Risk'
+    )
+    
+    # اعمال تم سفارشی
+    fig.update_layout(
+        template=custom_theme,
+        hovermode='closest',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        coloraxis_colorbar=dict(
+            title='Sharpe Ratio',
+            thickness=20
+        )
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
     # نمودار Married Put برای هر دارایی بیمه شده
     for name, info in insured_assets.items():
-        st.subheader(f"📉 Profit / Loss of Married Put Strategy - {name}")
+        st.subheader(f"📉 Married Put Strategy - {name}")
+        
+        # محاسبات سود و زیان
         x = np.linspace(info['spot'] * 0.5, info['spot'] * 1.5, 200)
         asset_pnl = (x - info['spot']) * info['base']
         put_pnl = np.where(x < info['strike'], (info['strike'] - x) * info['amount'], 0) - info['premium'] * info['amount']
         total_pnl = asset_pnl + put_pnl
-
+        
+        # محاسبه نقطه سر به سر
+        breakeven = info['spot'] + (info['premium'] * info['amount'] / info['base'])
+        
+        # ایجاد نمودار
         fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=x, y=total_pnl, mode='lines', name='Married Put', line=dict(color='blue', width=2)))
-        fig2.add_trace(go.Scatter(x=x, y=asset_pnl, mode='lines', name='Stock Only', line=dict(dash='dot', color='gray')))
-        fig2.add_trace(go.Scatter(x=x, y=put_pnl, mode='lines', name='Put Option', line=dict(dash='dot', color='orange')))
-
-        fig2.add_shape(type="rect", x0=x.min(), x1=info['spot'], y0=min(total_pnl.min(), 0), y1=0,
-                      fillcolor="red", opacity=0.2, line_width=0)
-        fig2.add_shape(type="rect", x0=info['spot'], x1=x.max(), y0=0, y1=max(total_pnl.max(), 0),
-                      fillcolor="green", opacity=0.2, line_width=0)
-
-        fig2.add_vline(x=info['spot'], line=dict(dash='dot', color='green'))
-        fig2.add_vline(x=info['strike'], line=dict(dash='dot', color='red'))
-
-        fig2.update_layout(title="Profit / Loss of Married Put",
-                           xaxis_title="Underlying Price at Expiration",
-                           yaxis_title="Profit / Loss",
-                           hovermode='x unified',
-                           plot_bgcolor='white')
-
-        st.plotly_chart(fig2, key=f"married_put_chart_{name}")
+        
+        # اضافه کردن ناحیه پر شده برای سود و زیان
+        fig2.add_trace(go.Scatter(
+            x=x, 
+            y=total_pnl, 
+            mode='lines', 
+            name='Married Put Strategy',
+            line=dict(width=3, color='#636EFA'),
+            fill='tozeroy',
+            fillcolor='rgba(99, 110, 250, 0.2)'
+        ))
+        
+        fig2.add_trace(go.Scatter(
+            x=x, 
+            y=asset_pnl, 
+            mode='lines', 
+            name='Underlying Asset',
+            line=dict(width=2, color='#EF553B', dash='dash'))
+        )
+        
+        fig2.add_trace(go.Scatter(
+            x=x, 
+            y=put_pnl, 
+            mode='lines', 
+            name='Put Option',
+            line=dict(width=2, color='#00CC96', dash='dash'))
+        )
+        
+        # اضافه کردن خطوط و نقاط مهم
+        fig2.add_shape(
+            type='line',
+            x0=info['spot'], y0=min(total_pnl.min(), asset_pnl.min(), put_pnl.min()),
+            x1=info['spot'], y1=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
+            line=dict(color='white', width=1, dash='dot'),
+            name='Current Price'
+        )
+        
+        fig2.add_shape(
+            type='line',
+            x0=breakeven, y0=min(total_pnl.min(), asset_pnl.min(), put_pnl.min()),
+            x1=breakeven, y1=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
+            line=dict(color='gold', width=1, dash='dot'),
+            name='Breakeven'
+        )
+        
+        # اضافه کردن حاشیه‌نویسی
+        annotations = [
+            dict(
+                x=info['spot'],
+                y=max(total_pnl.max(), asset_pnl.max(), put_pnl.max()),
+                xref='x',
+                yref='y',
+                text=f"Spot Price: {info['spot']:.2f}",
+                showarrow=True,
+                arrowhead=1,
+                ax=0,
+                ay=-40
+            ),
+            dict(
+                x=breakeven,
+                y=0,
+                xref='x',
+                yref='y',
+                text=f"Breakeven: {breakeven:.2f}",
+                showarrow=True,
+                arrowhead=1,
+                ax=0,
+                ay=40
+            ),
+            dict(
+                x=info['strike'],
+                y=put_pnl[np.abs(x - info['strike']).argmin()],
+                xref='x',
+                yref='y',
+                text=f"Strike Price: {info['strike']:.2f}",
+                showarrow=True,
+                arrowhead=1,
+                ax=40,
+                ay=0
+            )
+        ]
+        
+        # اعمال تم و تنظیمات نهایی
+        fig2.update_layout(
+            title=f'Married Put Strategy Payoff Diagram - {name}',
+            xaxis_title='Underlying Asset Price at Expiration',
+            yaxis_title='Profit/Loss',
+            template=custom_theme,
+            annotations=annotations,
+            hovermode='x unified',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        st.plotly_chart(fig2, use_container_width=True)
 
         if st.button(f"📷 ذخیره نمودار Married Put برای {name}", key=f"save_{name}"):
             fig2.write_image(f"married_put_{name}.png")
             st.success(f"نمودار Married Put برای {name} ذخیره شد.")
+
 else:
     st.info("لطفاً حداقل یک فایل CSV آپلود کنید.")
